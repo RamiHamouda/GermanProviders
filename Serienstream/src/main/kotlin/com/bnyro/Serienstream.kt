@@ -1,27 +1,9 @@
 package com.bnyro
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.lagradost.cloudstream3.HomePageList
-import com.lagradost.cloudstream3.HomePageResponse
-import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.MainPageRequest
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.SubtitleFile
-import com.lagradost.cloudstream3.TvSeriesSearchResponse
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.amap
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.fixUrl
-import com.lagradost.cloudstream3.fixUrlNull
-import com.lagradost.cloudstream3.newEpisode
-import com.lagradost.cloudstream3.newHomePageResponse
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse
-import com.lagradost.cloudstream3.newTvSeriesSearchResponse
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.runBlocking
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -116,6 +98,7 @@ open class Serienstream : MainAPI() {
         }
     }
 
+    // MODIFIED TO PRIORITIZE ENGLISH LINKS
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -123,13 +106,33 @@ open class Serienstream : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = app.get(data).document
-        document.select("div.hosterSiteVideo ul li").map {
+        
+        // First try to find English links (data-lang-key="en")
+        val englishLinks = document.select("div.hosterSiteVideo ul li").mapNotNull {
+            val langKey = it.attr("data-lang-key")
+            if (langKey != "en") return@mapNotNull null // Skip non-English
+            
             Triple(
-                it.attr("data-lang-key"),
+                langKey,
                 it.attr("data-link-target"),
                 it.select("h4").text()
             )
-        }.amap {
+        }
+        
+        // If no English links found, fall back to any available links
+        val links = if (englishLinks.isEmpty()) {
+            document.select("div.hosterSiteVideo ul li").map {
+                Triple(
+                    it.attr("data-lang-key"),
+                    it.attr("data-link-target"),
+                    it.select("h4").text()
+                )
+            }
+        } else {
+            englishLinks
+        }
+        
+        links.amap {
             val redirectUrl = app.get(fixUrl(it.second)).url
             val lang = it.first.getLanguage(document)
             val name = "${it.third} [${lang}]"
